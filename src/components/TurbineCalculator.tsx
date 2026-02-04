@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
-import type { Turbine, FilterSettings, Scenario, WizardStep, TurbineFilterSettings } from '../types'
-import { calculateScenarios, getDefaultFilters, getDefaultTurbineSettings } from '../utils/calculator'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import type { FilterSettings, Scenario, WizardStep } from '../types'
+import { calculateScenarios, getDefaultFilters } from '../utils/calculator'
 import { ALL_TURBINES, getAllBrands, getModelsByBrand, filterTurbines, getUniqueTurbines, getCapacityRange } from '../data/turbines'
 
 // ===== Icons =====
@@ -50,6 +50,11 @@ const Icons = {
       <polyline points="6 9 12 15 18 9"/>
     </svg>
   ),
+  Search: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+  ),
 }
 
 // ===== Step Indicator =====
@@ -95,7 +100,7 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   )
 }
 
-// ===== Multi-Select Dropdown =====
+// ===== Multi-Select Dropdown with Search =====
 function MultiSelect({
   label,
   options,
@@ -110,6 +115,35 @@ function MultiSelect({
   placeholder?: string
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  
+  // Dışarı tıklandığında kapat
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+        setSearchTerm('')
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+  
+  // Açıldığında input'a focus
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isOpen])
+  
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm.trim()) return options
+    const term = searchTerm.toLowerCase()
+    return options.filter(opt => opt.toLowerCase().includes(term))
+  }, [options, searchTerm])
   
   const toggleOption = (option: string) => {
     if (selected.includes(option)) {
@@ -119,10 +153,13 @@ function MultiSelect({
     }
   }
   
-  const clearAll = () => onChange([])
+  const clearAll = () => {
+    onChange([])
+    setSearchTerm('')
+  }
   
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <label className="block text-sm text-[var(--color-text-muted)] mb-2">{label}</label>
       <button
         type="button"
@@ -136,43 +173,72 @@ function MultiSelect({
       </button>
       
       {isOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute z-20 top-full left-0 right-0 mt-2 glass-card p-2 max-h-60 overflow-y-auto">
+        <div 
+          className="absolute left-0 right-0 mt-2 glass-card border border-white/10 shadow-2xl shadow-black/50 overflow-hidden"
+          style={{ zIndex: 9999, top: '100%' }}
+        >
+          {/* Search Input */}
+          <div className="p-2 border-b border-white/10">
+            <div className="relative">
+              <Icons.Search />
+              <input
+                ref={inputRef}
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Ara..."
+                className="input w-full pl-8 py-2 text-sm"
+                style={{ paddingLeft: '2rem' }}
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
+                <Icons.Search />
+              </span>
+            </div>
+          </div>
+          
+          {/* Options */}
+          <div className="max-h-60 overflow-y-auto p-2">
             {selected.length > 0 && (
               <button
                 type="button"
                 onClick={clearAll}
                 className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 rounded-lg mb-1"
               >
-                Tümünü Temizle
+                Tümünü Temizle ({selected.length})
               </button>
             )}
-            {options.map(option => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => toggleOption(option)}
-                className={`
-                  w-full px-3 py-2 text-left text-sm rounded-lg flex items-center justify-between
-                  ${selected.includes(option) 
-                    ? 'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]' 
-                    : 'hover:bg-white/5'
-                  }
-                `}
-              >
-                {option}
-                {selected.includes(option) && <Icons.Check />}
-              </button>
-            ))}
+            
+            {filteredOptions.length === 0 ? (
+              <div className="px-3 py-4 text-sm text-[var(--color-text-muted)] text-center">
+                Sonuç bulunamadı
+              </div>
+            ) : (
+              filteredOptions.map(option => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => toggleOption(option)}
+                  className={`
+                    w-full px-3 py-2 text-left text-sm rounded-lg flex items-center justify-between
+                    ${selected.includes(option) 
+                      ? 'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]' 
+                      : 'hover:bg-white/5'
+                    }
+                  `}
+                >
+                  {option}
+                  {selected.includes(option) && <Icons.Check />}
+                </button>
+              ))
+            )}
           </div>
-        </>
+        </div>
       )}
       
       {/* Selected Tags */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
-          {selected.map(s => (
+          {selected.slice(0, 5).map(s => (
             <span 
               key={s}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]"
@@ -183,6 +249,11 @@ function MultiSelect({
               </button>
             </span>
           ))}
+          {selected.length > 5 && (
+            <span className="px-2 py-1 text-xs text-[var(--color-text-muted)]">
+              +{selected.length - 5} daha
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -225,40 +296,9 @@ function FilterStep({
     return getUniqueTurbines(turbines)
   }, [filters.selectedBrands, filters.selectedModels, filters.minCapacity, filters.maxCapacity])
   
-  // Türbin ayarlarını senkronize et
-  useEffect(() => {
-    const existingIds = new Set(filters.turbineSettings.map(s => s.turbineId))
-    const newTurbineIds = new Set(filteredTurbines.map(t => t.id))
-    
-    // Sadece gerektiğinde güncelle
-    const needsUpdate = filteredTurbines.some(t => !existingIds.has(t.id)) ||
-                        filters.turbineSettings.some(s => !newTurbineIds.has(s.turbineId))
-    
-    if (needsUpdate) {
-      const newSettings: TurbineFilterSettings[] = filteredTurbines.map(t => {
-        const existing = filters.turbineSettings.find(s => s.turbineId === t.id)
-        return existing || getDefaultTurbineSettings(t.id)
-      })
-      setFilters({ ...filters, turbineSettings: newSettings })
-    }
-  }, [filteredTurbines])
-  
   const updateFilter = <K extends keyof FilterSettings>(key: K, value: FilterSettings[K]) => {
     setFilters({ ...filters, [key]: value })
   }
-  
-  const updateTurbineSettings = (turbineId: string, field: keyof TurbineFilterSettings, value: boolean | number) => {
-    const newSettings = filters.turbineSettings.map(s => 
-      s.turbineId === turbineId ? { ...s, [field]: value } : s
-    )
-    setFilters({ ...filters, turbineSettings: newSettings })
-  }
-  
-  const getTurbineSettings = (turbineId: string): TurbineFilterSettings => {
-    return filters.turbineSettings.find(s => s.turbineId === turbineId) || getDefaultTurbineSettings(turbineId)
-  }
-  
-  const enabledCount = filters.turbineSettings.filter(s => s.enabled).length
   
   // Marka değiştiğinde model seçimini temizle (ilgili olmayan modelleri)
   useEffect(() => {
@@ -278,7 +318,7 @@ function FilterStep({
       <div className="glass-card px-6 py-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Icons.Filter />
-          Türbin Filtreleri
+          Türbin Seçimi
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MultiSelect
@@ -293,7 +333,7 @@ function FilterStep({
             options={availableModels}
             selected={filters.selectedModels}
             onChange={(v) => updateFilter('selectedModels', v)}
-            placeholder="Tüm modeller"
+            placeholder={filters.selectedBrands.length > 0 ? 'Seçili markaların modelleri' : 'Tüm modeller'}
           />
         </div>
         
@@ -330,7 +370,7 @@ function FilterStep({
         
         <div className="mt-4 p-3 rounded-lg bg-white/5 text-sm">
           <span className="text-[var(--color-accent-primary)] font-medium">{filteredTurbines.length}</span>
-          <span className="text-[var(--color-text-muted)]"> türbin filtrelendi (toplam {ALL_TURBINES.length} türbin)</span>
+          <span className="text-[var(--color-text-muted)]"> türbin seçildi (toplam {ALL_TURBINES.length} türbin)</span>
         </div>
       </div>
       
@@ -340,7 +380,7 @@ function FilterStep({
           <Icons.Zap />
           Hedef Kapasite
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm text-[var(--color-text-muted)] mb-2">Hedef (MW)</label>
             <input
@@ -363,18 +403,32 @@ function FilterStep({
               max="100"
             />
           </div>
+          <div>
+            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Verimlilik (%)</label>
+            <input
+              type="number"
+              value={filters.efficiency}
+              onChange={(e) => {
+                const val = e.target.value === '' ? 100 : parseFloat(e.target.value)
+                updateFilter('efficiency', isNaN(val) ? 100 : Math.min(Math.max(val, 0), 100))
+              }}
+              className="input"
+              min="0"
+              max="100"
+            />
+          </div>
         </div>
       </div>
       
-      {/* Toplam Türbin Sayısı Limitleri */}
+      {/* Türbin Sayısı ve Ek Seçenekler */}
       <div className="glass-card px-6 py-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Icons.Settings />
-          Toplam Türbin Sayısı Limitleri
+          Ek Ayarlar
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
-            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Minimum Toplam</label>
+            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Min Türbin Sayısı</label>
             <input
               type="number"
               value={filters.minTurbineCount}
@@ -384,7 +438,7 @@ function FilterStep({
             />
           </div>
           <div>
-            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Maksimum Toplam</label>
+            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Max Türbin Sayısı</label>
             <input
               type="number"
               value={filters.maxTurbineCount}
@@ -393,15 +447,8 @@ function FilterStep({
               min="1"
             />
           </div>
-        </div>
-      </div>
-      
-      {/* Ek Seçenekler */}
-      <div className="glass-card px-6 py-6">
-        <h3 className="text-lg font-semibold mb-4">Ek Seçenekler</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Maksimum Senaryo Sayısı</label>
+            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Max Senaryo</label>
             <input
               type="number"
               value={filters.maxScenarios}
@@ -419,132 +466,18 @@ function FilterStep({
                 onChange={(e) => updateFilter('noExceedTarget', e.target.checked)}
                 className="w-5 h-5 rounded border-2 border-white/20 bg-transparent checked:bg-[var(--color-accent-primary)] checked:border-[var(--color-accent-primary)] cursor-pointer accent-[var(--color-accent-primary)]"
               />
-              <span className="text-sm">Hedef kapasiteyi aşma</span>
+              <span className="text-sm">Hedefi aşma</span>
             </label>
           </div>
         </div>
       </div>
-      
-      {/* Türbin Bazlı Ayarlar */}
-      {filteredTurbines.length > 0 && (
-        <div className="glass-card px-6 py-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Türbin Ayarları</h3>
-            <span className="text-sm text-[var(--color-text-muted)]">
-              {enabledCount} / {filteredTurbines.length} aktif
-            </span>
-          </div>
-          
-          {/* Header */}
-          <div className="hidden sm:grid grid-cols-12 gap-3 mb-2 px-4 text-xs text-[var(--color-text-muted)] font-medium">
-            <div className="col-span-1">Aktif</div>
-            <div className="col-span-4">Türbin</div>
-            <div className="col-span-2 text-center">Verimlilik %</div>
-            <div className="col-span-2 text-center">Min Adet</div>
-            <div className="col-span-2 text-center">Max Adet</div>
-            <div className="col-span-1"></div>
-          </div>
-          
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {filteredTurbines.map(turbine => {
-              const settings = getTurbineSettings(turbine.id)
-              return (
-                <div 
-                  key={turbine.id} 
-                  className={`
-                    grid grid-cols-1 sm:grid-cols-12 gap-3 items-center px-4 py-3 rounded-xl transition-all
-                    ${settings.enabled 
-                      ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30' 
-                      : 'bg-white/5 border border-white/10 opacity-60'
-                    }
-                  `}
-                >
-                  {/* Checkbox */}
-                  <div className="col-span-1 flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={settings.enabled}
-                      onChange={(e) => updateTurbineSettings(turbine.id, 'enabled', e.target.checked)}
-                      className="w-5 h-5 rounded border-2 border-white/20 bg-transparent checked:bg-[var(--color-accent-primary)] checked:border-[var(--color-accent-primary)] cursor-pointer"
-                    />
-                  </div>
-                  
-                  {/* Türbin Adı */}
-                  <div className="col-span-4">
-                    <div className="font-medium text-sm">{turbine.brand} {turbine.model}</div>
-                    <div className="text-xs text-[var(--color-text-muted)]">
-                      {turbine.capacity} MW
-                    </div>
-                  </div>
-                  
-                  {/* Verimlilik */}
-                  <div className="col-span-2">
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        value={settings.efficiency}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? 0 : parseFloat(e.target.value)
-                          updateTurbineSettings(turbine.id, 'efficiency', isNaN(val) ? 0 : val)
-                        }}
-                        className="input w-full text-center text-sm py-2"
-                        min="0"
-                        max="100"
-                        disabled={!settings.enabled}
-                      />
-                      <span className="text-xs text-[var(--color-text-muted)]">%</span>
-                    </div>
-                  </div>
-                  
-                  {/* Min Adet */}
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      value={settings.minCount}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? 0 : parseInt(e.target.value)
-                        updateTurbineSettings(turbine.id, 'minCount', isNaN(val) ? 0 : val)
-                      }}
-                      className="input w-full text-center text-sm py-2"
-                      min="0"
-                      disabled={!settings.enabled}
-                    />
-                  </div>
-                  
-                  {/* Max Adet */}
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      value={settings.maxCount}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? 0 : parseInt(e.target.value)
-                        updateTurbineSettings(turbine.id, 'maxCount', isNaN(val) ? 0 : val)
-                      }}
-                      className="input w-full text-center text-sm py-2"
-                      min="0"
-                      disabled={!settings.enabled}
-                    />
-                  </div>
-                  
-                  {/* Efektif MW */}
-                  <div className="col-span-1 text-right">
-                    <span className="text-xs text-[var(--color-text-muted)]">
-                      {(turbine.capacity * settings.efficiency / 100).toFixed(2)} MW
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
       
       {/* Navigation */}
       <div className="flex justify-end pt-4">
         <button 
           type="button" 
           onClick={onNext} 
-          disabled={enabledCount === 0}
+          disabled={filteredTurbines.length === 0}
           className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Hesapla
@@ -579,7 +512,7 @@ function ResultsStep({
     <div className="space-y-6">
       {/* Summary */}
       <div className="glass-card px-6 py-6">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
           <div>
             <div className="text-3xl font-bold text-gradient">{scenarios.length}</div>
             <div className="text-sm text-[var(--color-text-muted)]">Senaryo Bulundu</div>
@@ -591,6 +524,10 @@ function ResultsStep({
           <div>
             <div className="text-3xl font-bold">±{filters.tolerancePercent}%</div>
             <div className="text-sm text-[var(--color-text-muted)]">Tolerans</div>
+          </div>
+          <div>
+            <div className="text-3xl font-bold">{filters.efficiency}%</div>
+            <div className="text-sm text-[var(--color-text-muted)]">Verimlilik</div>
           </div>
         </div>
       </div>

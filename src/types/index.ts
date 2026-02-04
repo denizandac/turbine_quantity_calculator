@@ -8,15 +8,6 @@ export interface Turbine {
   hubHeight?: number // metre cinsinden (opsiyonel)
 }
 
-// Türbin başına filtre ayarları
-export interface TurbineFilterSettings {
-  turbineId: string
-  enabled: boolean // Bu türbin hesaplamaya dahil mi
-  efficiency: number // Verimlilik yüzdesi (0-100)
-  minCount: number // Minimum adet
-  maxCount: number // Maksimum adet
-}
-
 // Genel filtre/beklenti ayarları
 export interface FilterSettings {
   // Marka ve Model filtreleri
@@ -35,8 +26,8 @@ export interface FilterSettings {
   minTurbineCount: number // Minimum toplam türbin sayısı
   maxTurbineCount: number // Maksimum toplam türbin sayısı
   
-  // Türbin başına ayarlar
-  turbineSettings: TurbineFilterSettings[]
+  // Global verimlilik (tüm türbinler için)
+  efficiency: number // Verimlilik yüzdesi (0-100)
   
   // Ek seçenekler
   noExceedTarget: boolean // Hedef kapasiteyi aşma (true = sadece hedef altı)

@@ -1,12 +1,5 @@
-import type { Turbine, FilterSettings, Scenario, ScenarioItem, TurbineFilterSettings } from '../types'
+import type { Turbine, FilterSettings, Scenario, ScenarioItem } from '../types'
 import { getCapacityRange } from '../data/turbines'
-
-// Hesaplama için türbin bilgisi (verimlilik uygulanmış)
-interface TurbineWithSettings {
-  turbine: Turbine
-  settings: TurbineFilterSettings
-  effectiveCapacity: number // Verimlilik uygulanmış kapasite
-}
 
 /**
  * Türbin kombinasyonlarını hesaplar ve senaryoları döndürür
@@ -17,25 +10,12 @@ export function calculateScenarios(
 ): Scenario[] {
   const scenarios: Scenario[] = []
   
-  // Türbinleri ayarlarıyla birleştir ve filtrele
-  const turbinesWithSettings: TurbineWithSettings[] = turbines
-    .map(t => {
-      const settings = filters.turbineSettings.find(s => s.turbineId === t.id) || getDefaultTurbineSettings(t.id)
-      return {
-        turbine: t,
-        settings,
-        effectiveCapacity: t.capacity * (settings.efficiency / 100)
-      }
-    })
-    .filter(t => {
-      // Aktif değilse dahil etme
-      if (!t.settings.enabled) return false
-      return true
-    })
-
-  if (turbinesWithSettings.length === 0) {
+  if (turbines.length === 0) {
     return []
   }
+
+  // Global verimlilik
+  const efficiency = filters.efficiency / 100
 
   // Hedef kapasite
   const targetCapacity = filters.targetCapacity
@@ -46,6 +26,9 @@ export function calculateScenarios(
   const maxCapacity = filters.noExceedTarget 
     ? targetCapacity 
     : targetCapacity * (1 + filters.tolerancePercent / 100)
+
+  // Her türbin için max count (maxTurbineCount'a kadar)
+  const maxCountPerTurbine = filters.maxTurbineCount
 
   // Recursive kombinasyon üreteci
   function generateCombinations(
@@ -86,37 +69,35 @@ export function calculateScenarios(
     }
 
     // Tüm türbinleri denedik
-    if (index >= turbinesWithSettings.length) {
+    if (index >= turbines.length) {
       return
     }
 
-    const tws = turbinesWithSettings[index]
-    const { turbine, settings, effectiveCapacity } = tws
+    const turbine = turbines[index]
+    const effectiveCapacityPerUnit = turbine.capacity * efficiency
     
-    // Bu türbin için min/max sayı
-    const minForThis = settings.minCount
+    // Bu türbin için max sayı
     const maxForThis = Math.min(
-      settings.maxCount,
+      maxCountPerTurbine,
       filters.maxTurbineCount - currentCount,
-      effectiveCapacity > 0 ? Math.ceil((maxCapacity - currentCapacity) / effectiveCapacity) : 0
+      effectiveCapacityPerUnit > 0 ? Math.ceil((maxCapacity - currentCapacity) / effectiveCapacityPerUnit) : 0
     )
 
-    // minCount'tan başla
-    for (let count = minForThis; count <= maxForThis; count++) {
+    // 0'dan başla (türbini kullanmayabilir)
+    for (let count = 0; count <= maxForThis; count++) {
       const newItems = [...currentItems]
       if (count > 0) {
-        const existingIndex = newItems.findIndex(item => item.turbine.id === turbine.id)
-        if (existingIndex >= 0) {
-          newItems[existingIndex] = { ...newItems[existingIndex], count, effectiveCapacity: effectiveCapacity * count }
-        } else {
-          newItems.push({ turbine, count, effectiveCapacity: effectiveCapacity * count })
-        }
+        newItems.push({ 
+          turbine, 
+          count, 
+          effectiveCapacity: effectiveCapacityPerUnit * count 
+        })
       }
       
       generateCombinations(
         index + 1,
         newItems,
-        currentCapacity + effectiveCapacity * count,
+        currentCapacity + effectiveCapacityPerUnit * count,
         currentCount + count
       )
     }
@@ -141,19 +122,6 @@ export function generateId(): string {
 }
 
 /**
- * Türbin için varsayılan ayarlar
- */
-export function getDefaultTurbineSettings(turbineId: string): TurbineFilterSettings {
-  return {
-    turbineId,
-    enabled: true,
-    efficiency: 100,
-    minCount: 0,
-    maxCount: 50
-  }
-}
-
-/**
  * Varsayılan filtre ayarları
  */
 export function getDefaultFilters(): FilterSettings {
@@ -168,7 +136,7 @@ export function getDefaultFilters(): FilterSettings {
     tolerancePercent: 5, // %5 tolerans
     minTurbineCount: 1,
     maxTurbineCount: 50,
-    turbineSettings: [],
+    efficiency: 100, // %100 verimlilik
     noExceedTarget: false, // Hedef aşılmasın
     maxScenarios: 100 // Maksimum senaryo sayısı
   }
