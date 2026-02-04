@@ -19,7 +19,6 @@ const CALCULATION_TIMEOUT = 30000
 
 /**
  * Türbin kombinasyonlarını hesaplar ve senaryoları döndürür
- * Optimize edilmiş versiyon - akıllı budama ve timeout
  */
 function calculateScenarios(
   turbines: Turbine[],
@@ -45,18 +44,26 @@ function calculateScenarios(
     ? targetCapacity 
     : targetCapacity * (1 + filters.tolerancePercent / 100)
 
-  // Türbinleri kapasiteye göre büyükten küçüğe sırala (daha iyi budama için)
+  console.log('Calculation params:', { 
+    turbineCount: turbines.length, 
+    targetCapacity, 
+    minCapacity, 
+    maxCapacity,
+    efficiency 
+  })
+
+  // Türbinleri kapasiteye göre büyükten küçüğe sırala
   const sortedTurbines = [...turbines].sort((a, b) => b.capacity - a.capacity)
   
   // Her türbin için efektif kapasite hesapla
   const turbineData = sortedTurbines.map(t => ({
     turbine: t,
     effectiveCapacity: t.capacity * efficiency,
-    // Bu türbinden maksimum kaç adet kullanılabilir (hedef kapasiteye göre)
-    maxPossible: Math.min(
+    // Bu türbinden maksimum kaç adet kullanılabilir
+    maxCount: Math.min(
       filters.maxTurbineCount,
       t.capacity * efficiency > 0 
-        ? Math.ceil(maxCapacity / (t.capacity * efficiency)) 
+        ? Math.ceil(maxCapacity / (t.capacity * efficiency)) + 1
         : 0
     )
   }))
@@ -64,25 +71,23 @@ function calculateScenarios(
   let processedCombinations = 0
   let lastProgressUpdate = 0
 
-  // Recursive kombinasyon üreteci - optimize edilmiş
+  // Recursive kombinasyon üreteci
   function generateCombinations(
     index: number,
     currentItems: ScenarioItem[],
     currentCapacity: number,
-    currentCount: number,
-    remainingMinCapacity: number
+    currentCount: number
   ): boolean {
     // Timeout kontrolü
     if (Date.now() - startTime > CALCULATION_TIMEOUT) {
-      return true // Dur
+      return true
     }
 
     processedCombinations++
     
-    // Her 5000 kombinasyonda progress güncelle
-    if (processedCombinations - lastProgressUpdate > 5000) {
+    // Her 10000 kombinasyonda progress güncelle
+    if (processedCombinations - lastProgressUpdate > 10000) {
       lastProgressUpdate = processedCombinations
-      // İlerlemeyi tahmini olarak hesapla
       const elapsedTime = Date.now() - startTime
       const progress = Math.min(90, (elapsedTime / CALCULATION_TIMEOUT) * 100)
       onProgress(progress)
@@ -93,23 +98,18 @@ function calculateScenarios(
       return true
     }
 
-    // Maksimum toplam türbin sayısı aşıldı - BUDAMA
+    // BUDAMA: Maksimum türbin sayısı aşıldı
     if (currentCount > filters.maxTurbineCount) {
       return false
     }
 
-    // Kapasite maksimumu aştı - BUDAMA
-    if (currentCapacity > maxCapacity) {
-      return false
-    }
-
-    // Kalan türbinlerle bile minimum kapasiteye ulaşılamıyorsa - BUDAMA
-    if (currentCapacity + remainingMinCapacity < minCapacity && index >= turbineData.length) {
+    // BUDAMA: Kapasite maksimumu aştı
+    if (currentCapacity > maxCapacity + 0.001) {
       return false
     }
 
     // Geçerli bir senaryo mu kontrol et
-    if (currentCapacity >= minCapacity && currentCapacity <= maxCapacity) {
+    if (currentCapacity >= minCapacity - 0.001 && currentCapacity <= maxCapacity + 0.001) {
       if (currentCount >= filters.minTurbineCount && currentCount <= filters.maxTurbineCount) {
         const validItems = currentItems.filter(item => item.count > 0)
         
@@ -125,7 +125,6 @@ function calculateScenarios(
             differencePercent: Math.round(((currentCapacity - targetCapacity) / targetCapacity) * 10000) / 100
           })
 
-          // Yeterli senaryo bulundu
           if (scenarios.length >= filters.maxScenarios) {
             return true
           }
@@ -139,50 +138,33 @@ function calculateScenarios(
     }
 
     const data = turbineData[index]
-    const { turbine, effectiveCapacity, maxPossible } = data
+    const { turbine, effectiveCapacity, maxCount } = data
     
-    // Kalan türbinlerin maksimum potansiyel kapasitesi
-    let remainingMaxCapacity = 0
-    for (let i = index; i < turbineData.length; i++) {
-      remainingMaxCapacity += turbineData[i].effectiveCapacity * turbineData[i].maxPossible
-    }
-    
-    // Bu türbin için max sayı - dinamik optimizasyon
+    // Bu türbin için maksimum adet
     const maxForThis = Math.min(
-      maxPossible,
+      maxCount,
       filters.maxTurbineCount - currentCount,
-      effectiveCapacity > 0 ? Math.ceil((maxCapacity - currentCapacity) / effectiveCapacity) : 0
+      effectiveCapacity > 0 ? Math.ceil((maxCapacity - currentCapacity) / effectiveCapacity) + 1 : 0
     )
 
-    // 0'dan başla
+    // 0'dan başla (bu türbini kullanmama dahil)
     for (let count = 0; count <= maxForThis; count++) {
-      // Erken budama: Bu ve sonraki türbinlerle minimum kapasiteye ulaşılamıyorsa atla
-      const potentialCapacity = currentCapacity + (effectiveCapacity * count)
-      const futureMaxCapacity = potentialCapacity + remainingMaxCapacity - (effectiveCapacity * maxPossible)
+      const newCapacity = currentCapacity + effectiveCapacity * count
       
-      if (futureMaxCapacity < minCapacity && count === 0) {
-        // Bu türbini kullanmadan devam etmenin anlamı yok
-        continue
+      // BUDAMA: Eğer kapasite zaten aşıldıysa daha fazla eklemenin anlamı yok
+      if (newCapacity > maxCapacity + 0.001) {
+        break
       }
 
-      const newItems = [...currentItems]
-      if (count > 0) {
-        newItems.push({ 
-          turbine, 
-          count, 
-          effectiveCapacity: effectiveCapacity * count 
-        })
-      }
-      
-      // Kalan minimum kapasite (sonraki türbinler için)
-      const newRemainingMin = remainingMaxCapacity - (effectiveCapacity * maxPossible)
+      const newItems = count > 0 
+        ? [...currentItems, { turbine, count, effectiveCapacity: effectiveCapacity * count }]
+        : currentItems
       
       const shouldStop = generateCombinations(
         index + 1,
         newItems,
-        currentCapacity + effectiveCapacity * count,
-        currentCount + count,
-        newRemainingMin
+        newCapacity,
+        currentCount + count
       )
 
       if (shouldStop) {
@@ -193,14 +175,10 @@ function calculateScenarios(
     return false
   }
 
-  // Kalan maksimum kapasite hesapla (başlangıç için)
-  let totalRemainingCapacity = 0
-  for (const data of turbineData) {
-    totalRemainingCapacity += data.effectiveCapacity * data.maxPossible
-  }
-
   // Kombinasyonları üret
-  generateCombinations(0, [], 0, 0, totalRemainingCapacity)
+  generateCombinations(0, [], 0, 0)
+
+  console.log('Found scenarios:', scenarios.length)
 
   // Farka göre sırala (hedefe en yakın önce)
   scenarios.sort((a, b) => Math.abs(a.difference) - Math.abs(b.difference))
@@ -212,10 +190,14 @@ function calculateScenarios(
 self.onmessage = (e: MessageEvent<WorkerInput>) => {
   const { turbines, filters } = e.data
   
+  console.log('Worker received:', { turbineCount: turbines.length, filters })
+  
   try {
     const scenarios = calculateScenarios(turbines, filters, (progress) => {
       self.postMessage({ type: 'progress', progress } as WorkerOutput)
     })
+    
+    console.log('Worker sending results:', scenarios.length)
     
     self.postMessage({ 
       type: 'complete', 
@@ -223,6 +205,7 @@ self.onmessage = (e: MessageEvent<WorkerInput>) => {
       progress: 100 
     } as WorkerOutput)
   } catch (error) {
+    console.error('Worker error:', error)
     self.postMessage({ 
       type: 'error', 
       error: error instanceof Error ? error.message : 'Hesaplama hatası' 
