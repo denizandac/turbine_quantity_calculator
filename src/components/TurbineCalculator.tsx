@@ -174,21 +174,19 @@ function MultiSelect({
       
       {isOpen && (
         <div 
-          className="absolute left-0 right-0 mt-2 glass-card border border-white/10 shadow-2xl shadow-black/50 overflow-hidden"
-          style={{ zIndex: 9999, top: '100%' }}
+          className="absolute left-0 right-0 mt-2 rounded-xl border border-white/10 shadow-2xl shadow-black/50 overflow-hidden"
+          style={{ zIndex: 9999, top: '100%', backgroundColor: 'var(--color-bg-secondary)' }}
         >
           {/* Search Input */}
-          <div className="p-2 border-b border-white/10">
+          <div className="p-3 border-b border-white/10">
             <div className="relative">
-              <Icons.Search />
               <input
                 ref={inputRef}
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Ara..."
-                className="input w-full pl-8 py-2 text-sm"
-                style={{ paddingLeft: '2rem' }}
+                className="input w-full pl-9 py-2 text-sm"
               />
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
                 <Icons.Search />
