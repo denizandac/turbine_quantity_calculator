@@ -159,7 +159,11 @@ function MultiSelect({
   }
   
   return (
-    <div className="relative" ref={containerRef}>
+    <div 
+      className="relative" 
+      ref={containerRef}
+      style={{ zIndex: isOpen ? 100 : 'auto' }}
+    >
       <label className="block text-sm text-[var(--color-text-muted)] mb-2">{label}</label>
       <button
         type="button"

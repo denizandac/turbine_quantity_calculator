@@ -89,13 +89,7 @@ h1, h2, h3, h4, h5, h6 {
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-border);
   border-radius: 1.5rem;
-  transition: all var(--transition-base);
-  
-  &:hover {
-    border-color: rgba(0, 212, 255, 0.3);
-    box-shadow: 0 0 40px var(--color-glow-cyan);
-    transform: translateY(-4px);
-  }
+  position: relative;
 }
 
 // ===== Buttons =====
