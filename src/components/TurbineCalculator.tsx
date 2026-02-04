@@ -316,8 +316,8 @@ function FilterStep({
   
   return (
     <div className="space-y-6">
-      {/* Türbin Filtreleri */}
-      <div className="glass-card px-6 py-6">
+      {/* Türbin Filtreleri - z-index yüksek tutuldu dropdown için */}
+      <div className="glass-card px-6 py-6 relative" style={{ zIndex: 50 }}>
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <Icons.Filter />
           Türbin Seçimi
