@@ -4,8 +4,8 @@ export interface Turbine {
   brand: string
   model: string
   capacity: number // MW cinsinden
-  bladeWidth: number // metre cinsinden
-  hubHeight: number // metre cinsinden
+  bladeWidth?: number // metre cinsinden (opsiyonel)
+  hubHeight?: number // metre cinsinden (opsiyonel)
 }
 
 // Türbin başına filtre ayarları
@@ -19,13 +19,26 @@ export interface TurbineFilterSettings {
 
 // Genel filtre/beklenti ayarları
 export interface FilterSettings {
+  // Marka ve Model filtreleri
+  selectedBrands: string[]
+  selectedModels: string[]
+  
+  // Kapasite filtreleri
+  minCapacity: number
+  maxCapacity: number
+  
+  // Hedef ve tolerans
   targetCapacity: number // Hedef toplam kapasite (MW)
   tolerancePercent: number // Tolerans yüzdesi (eksik/fazla MW için)
+  
+  // Türbin sayısı limitleri
   minTurbineCount: number // Minimum toplam türbin sayısı
   maxTurbineCount: number // Maksimum toplam türbin sayısı
-  minHubHeight: number | null // Minimum hub yüksekliği (null = filtre yok)
-  maxHubHeight: number | null // Maksimum hub yüksekliği (null = filtre yok)
-  turbineSettings: TurbineFilterSettings[] // Türbin başına ayarlar
+  
+  // Türbin başına ayarlar
+  turbineSettings: TurbineFilterSettings[]
+  
+  // Ek seçenekler
   noExceedTarget: boolean // Hedef kapasiteyi aşma (true = sadece hedef altı)
   maxScenarios: number // Maksimum senaryo sayısı (1-100)
 }
@@ -47,14 +60,5 @@ export interface Scenario {
   differencePercent: number // Fark yüzdesi
 }
 
-// Wizard adımları
-export type WizardStep = 'turbines' | 'filters' | 'results'
-
-// Excel'den okunan ham veri
-export interface ExcelTurbineRow {
-  brand?: string
-  model?: string
-  capacity?: number
-  bladeWidth?: number
-  hubHeight?: number
-}
+// Wizard adımları (artık 2 adım)
+export type WizardStep = 'filters' | 'results'

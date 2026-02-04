@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { Turbine, FilterSettings, Scenario, WizardStep, TurbineFilterSettings } from '../types'
-import { calculateScenarios, generateId, getDefaultFilters, getDefaultTurbineSettings } from '../utils/calculator'
-import { parseExcelFile, downloadExcelTemplate } from '../utils/excelParser'
+import { calculateScenarios, getDefaultFilters, getDefaultTurbineSettings } from '../utils/calculator'
+import { ALL_TURBINES, getAllBrands, getModelsByBrand, filterTurbines, getUniqueTurbines, getCapacityRange } from '../data/turbines'
 
 // ===== Icons =====
 const Icons = {
@@ -10,24 +10,9 @@ const Icons = {
       <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>
     </svg>
   ),
-  Plus: () => (
+  Filter: () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-    </svg>
-  ),
-  Trash: () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-    </svg>
-  ),
-  Upload: () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-    </svg>
-  ),
-  Download: () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
     </svg>
   ),
   ArrowRight: () => (
@@ -55,14 +40,23 @@ const Icons = {
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
     </svg>
   ),
+  X: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
+  ChevronDown: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  ),
 }
 
 // ===== Step Indicator =====
 function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const steps: { key: WizardStep; label: string; number: number }[] = [
-    { key: 'turbines', label: 'Türbinler', number: 1 },
-    { key: 'filters', label: 'Filtreler', number: 2 },
-    { key: 'results', label: 'Sonuçlar', number: 3 },
+    { key: 'filters', label: 'Filtreler', number: 1 },
+    { key: 'results', label: 'Sonuçlar', number: 2 },
   ]
   
   const currentIndex = steps.findIndex(s => s.key === currentStep)
@@ -101,243 +95,153 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   )
 }
 
-// ===== Step 1: Türbin Ekleme =====
-function TurbineStep({
-  turbines,
-  setTurbines,
-  onNext
+// ===== Multi-Select Dropdown =====
+function MultiSelect({
+  label,
+  options,
+  selected,
+  onChange,
+  placeholder = 'Seçiniz...'
 }: {
-  turbines: Turbine[]
-  setTurbines: (t: Turbine[]) => void
-  onNext: () => void
+  label: string
+  options: string[]
+  selected: string[]
+  onChange: (values: string[]) => void
+  placeholder?: string
 }) {
-  const [dragOver, setDragOver] = useState(false)
+  const [isOpen, setIsOpen] = useState(false)
   
-  const addEmptyTurbine = () => {
-    setTurbines([...turbines, {
-      id: generateId(),
-      brand: '',
-      model: '',
-      capacity: 0,
-      bladeWidth: 0,
-      hubHeight: 0
-    }])
-  }
-  
-  const updateTurbine = (id: string, field: keyof Turbine, value: string | number) => {
-    setTurbines(turbines.map(t => 
-      t.id === id ? { ...t, [field]: value } : t
-    ))
-  }
-  
-  const deleteTurbine = (id: string) => {
-    setTurbines(turbines.filter(t => t.id !== id))
-  }
-  
-  const handleFileUpload = async (file: File) => {
-    try {
-      const imported = await parseExcelFile(file)
-      setTurbines([...turbines, ...imported])
-    } catch (error) {
-      alert('Excel dosyası okunamadı. Lütfen şablona uygun bir dosya yükleyin.')
+  const toggleOption = (option: string) => {
+    if (selected.includes(option)) {
+      onChange(selected.filter(s => s !== option))
+    } else {
+      onChange([...selected, option])
     }
   }
   
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
-      handleFileUpload(file)
-    }
-  }, [turbines])
-  
-  const validTurbines = turbines.filter(t => t.brand && t.model && t.capacity > 0)
+  const clearAll = () => onChange([])
   
   return (
-    <div className="space-y-6">
-      {/* Excel Import Area */}
-      <div
-        className={`
-          glass-card px-8 py-10 text-center cursor-pointer transition-all
-          ${dragOver ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10' : ''}
-        `}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => document.getElementById('excel-input')?.click()}
+    <div className="relative">
+      <label className="block text-sm text-[var(--color-text-muted)] mb-2">{label}</label>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="input w-full flex items-center justify-between gap-2 text-left"
       >
-        <input
-          id="excel-input"
-          type="file"
-          accept=".xlsx,.xls"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) handleFileUpload(file)
-          }}
-        />
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-primary)]/20 flex items-center justify-center text-[var(--color-accent-primary)]">
-            <Icons.Upload />
-          </div>
-          <div>
-            <p className="text-lg font-medium">Excel Dosyası Yükle</p>
-            <p className="text-sm text-[var(--color-text-muted)] mt-1">
-              Sürükle-bırak veya tıkla (.xlsx, .xls)
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary text-sm"
-            onClick={(e) => {
-              e.stopPropagation()
-              downloadExcelTemplate()
-            }}
-          >
-            <Icons.Download />
-            Şablon İndir
-          </button>
-        </div>
-      </div>
+        <span className={selected.length === 0 ? 'text-[var(--color-text-muted)]' : ''}>
+          {selected.length === 0 ? placeholder : `${selected.length} seçili`}
+        </span>
+        <Icons.ChevronDown />
+      </button>
       
-      {/* Divider */}
-      <div className="flex items-center gap-4">
-        <div className="flex-1 h-px bg-white/10" />
-        <span className="text-sm text-[var(--color-text-muted)]">veya manuel ekle</span>
-        <div className="flex-1 h-px bg-white/10" />
-      </div>
-      
-      {/* Türbin Listesi */}
-      <div className="space-y-3">
-        {turbines.map((turbine, index) => (
-          <div key={turbine.id} className="glass-card px-5 py-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-sm text-[var(--color-text-muted)] w-6">{index + 1}.</span>
-              
-              <input
-                type="text"
-                placeholder="Marka"
-                value={turbine.brand}
-                onChange={(e) => updateTurbine(turbine.id, 'brand', e.target.value)}
-                className="input flex-1 min-w-[100px]"
-              />
-              
-              <input
-                type="text"
-                placeholder="Model"
-                value={turbine.model}
-                onChange={(e) => updateTurbine(turbine.id, 'model', e.target.value)}
-                className="input flex-1 min-w-[100px]"
-              />
-              
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  placeholder="MW"
-                  value={turbine.capacity || ''}
-                  onChange={(e) => updateTurbine(turbine.id, 'capacity', parseFloat(e.target.value) || 0)}
-                  className="input w-20 text-center"
-                  step="0.01"
-                />
-                <span className="text-xs text-[var(--color-text-muted)]">MW</span>
-              </div>
-              
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  placeholder="Rotor"
-                  value={turbine.bladeWidth || ''}
-                  onChange={(e) => updateTurbine(turbine.id, 'bladeWidth', parseFloat(e.target.value) || 0)}
-                  className="input w-20 text-center"
-                />
-                <span className="text-xs text-[var(--color-text-muted)]">m</span>
-              </div>
-              
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  placeholder="Hub"
-                  value={turbine.hubHeight || ''}
-                  onChange={(e) => updateTurbine(turbine.id, 'hubHeight', parseFloat(e.target.value) || 0)}
-                  className="input w-20 text-center"
-                />
-                <span className="text-xs text-[var(--color-text-muted)]">m</span>
-              </div>
-              
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+          <div className="absolute z-20 top-full left-0 right-0 mt-2 glass-card p-2 max-h-60 overflow-y-auto">
+            {selected.length > 0 && (
               <button
                 type="button"
-                onClick={() => deleteTurbine(turbine.id)}
-                className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
+                onClick={clearAll}
+                className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 rounded-lg mb-1"
               >
-                <Icons.Trash />
+                Tümünü Temizle
               </button>
-            </div>
+            )}
+            {options.map(option => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => toggleOption(option)}
+                className={`
+                  w-full px-3 py-2 text-left text-sm rounded-lg flex items-center justify-between
+                  ${selected.includes(option) 
+                    ? 'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]' 
+                    : 'hover:bg-white/5'
+                  }
+                `}
+              >
+                {option}
+                {selected.includes(option) && <Icons.Check />}
+              </button>
+            ))}
           </div>
-        ))}
-        
-        {/* Add Button */}
-        <button
-          type="button"
-          onClick={addEmptyTurbine}
-          className="w-full glass-card px-5 py-4 flex items-center justify-center gap-2 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 transition-colors"
-        >
-          <Icons.Plus />
-          Yeni Türbin Ekle
-        </button>
-      </div>
+        </>
+      )}
       
-      {/* Navigation */}
-      <div className="flex justify-end pt-4">
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={validTurbines.length === 0}
-          className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Devam Et
-          <Icons.ArrowRight />
-        </button>
-      </div>
-      
-      {validTurbines.length === 0 && turbines.length > 0 && (
-        <p className="text-sm text-yellow-400 text-center">
-          Devam etmek için en az bir geçerli türbin ekleyin (marka, model ve kapasite zorunlu)
-        </p>
+      {/* Selected Tags */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {selected.map(s => (
+            <span 
+              key={s}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]"
+            >
+              {s}
+              <button type="button" onClick={() => toggleOption(s)} className="hover:text-white">
+                <Icons.X />
+              </button>
+            </span>
+          ))}
+        </div>
       )}
     </div>
   )
 }
 
-// ===== Step 2: Filtreler =====
+// ===== Filter Step =====
 function FilterStep({
-  turbines,
   filters,
   setFilters,
-  onNext,
-  onBack
+  onNext
 }: {
-  turbines: Turbine[]
   filters: FilterSettings
   setFilters: (f: FilterSettings) => void
   onNext: () => void
-  onBack: () => void
 }) {
-  const validTurbines = turbines.filter(t => t.brand && t.model && t.capacity > 0)
+  const capacityRange = getCapacityRange()
+  const allBrands = useMemo(() => getAllBrands(), [])
+  
+  // Seçili markalara göre modelleri filtrele
+  const availableModels = useMemo(() => {
+    if (filters.selectedBrands.length === 0) {
+      // Tüm modeller
+      const models = [...new Set(ALL_TURBINES.map(t => t.model))]
+      return models.sort()
+    }
+    // Seçili markalardaki modeller
+    const models = filters.selectedBrands.flatMap(brand => getModelsByBrand(brand))
+    return [...new Set(models)].sort()
+  }, [filters.selectedBrands])
+  
+  // Filtrelenmiş türbinler
+  const filteredTurbines = useMemo(() => {
+    const turbines = filterTurbines(
+      filters.selectedBrands,
+      filters.selectedModels,
+      filters.minCapacity,
+      filters.maxCapacity
+    )
+    return getUniqueTurbines(turbines)
+  }, [filters.selectedBrands, filters.selectedModels, filters.minCapacity, filters.maxCapacity])
   
   // Türbin ayarlarını senkronize et
   useEffect(() => {
-    const existingIds = filters.turbineSettings.map(s => s.turbineId)
-    const newSettings: TurbineFilterSettings[] = validTurbines.map(t => {
-      const existing = filters.turbineSettings.find(s => s.turbineId === t.id)
-      return existing || getDefaultTurbineSettings(t.id)
-    })
+    const existingIds = new Set(filters.turbineSettings.map(s => s.turbineId))
+    const newTurbineIds = new Set(filteredTurbines.map(t => t.id))
     
-    // Sadece değişiklik varsa güncelle
-    if (JSON.stringify(newSettings.map(s => s.turbineId)) !== JSON.stringify(existingIds)) {
+    // Sadece gerektiğinde güncelle
+    const needsUpdate = filteredTurbines.some(t => !existingIds.has(t.id)) ||
+                        filters.turbineSettings.some(s => !newTurbineIds.has(s.turbineId))
+    
+    if (needsUpdate) {
+      const newSettings: TurbineFilterSettings[] = filteredTurbines.map(t => {
+        const existing = filters.turbineSettings.find(s => s.turbineId === t.id)
+        return existing || getDefaultTurbineSettings(t.id)
+      })
       setFilters({ ...filters, turbineSettings: newSettings })
     }
-  }, [validTurbines.length])
+  }, [filteredTurbines])
   
   const updateFilter = <K extends keyof FilterSettings>(key: K, value: FilterSettings[K]) => {
     setFilters({ ...filters, [key]: value })
@@ -347,10 +251,6 @@ function FilterStep({
     const newSettings = filters.turbineSettings.map(s => 
       s.turbineId === turbineId ? { ...s, [field]: value } : s
     )
-    // Eğer türbin ayarı yoksa ekle
-    if (!newSettings.find(s => s.turbineId === turbineId)) {
-      newSettings.push({ ...getDefaultTurbineSettings(turbineId), [field]: value })
-    }
     setFilters({ ...filters, turbineSettings: newSettings })
   }
   
@@ -360,8 +260,80 @@ function FilterStep({
   
   const enabledCount = filters.turbineSettings.filter(s => s.enabled).length
   
+  // Marka değiştiğinde model seçimini temizle (ilgili olmayan modelleri)
+  useEffect(() => {
+    if (filters.selectedBrands.length > 0) {
+      const validModels = filters.selectedModels.filter(model => 
+        availableModels.includes(model)
+      )
+      if (validModels.length !== filters.selectedModels.length) {
+        setFilters({ ...filters, selectedModels: validModels })
+      }
+    }
+  }, [filters.selectedBrands, availableModels])
+  
   return (
     <div className="space-y-6">
+      {/* Türbin Filtreleri */}
+      <div className="glass-card px-6 py-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Icons.Filter />
+          Türbin Filtreleri
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <MultiSelect
+            label="Marka"
+            options={allBrands}
+            selected={filters.selectedBrands}
+            onChange={(v) => updateFilter('selectedBrands', v)}
+            placeholder="Tüm markalar"
+          />
+          <MultiSelect
+            label="Model"
+            options={availableModels}
+            selected={filters.selectedModels}
+            onChange={(v) => updateFilter('selectedModels', v)}
+            placeholder="Tüm modeller"
+          />
+        </div>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+          <div>
+            <label className="block text-sm text-[var(--color-text-muted)] mb-2">
+              Min Kapasite (MW)
+            </label>
+            <input
+              type="number"
+              value={filters.minCapacity}
+              onChange={(e) => updateFilter('minCapacity', parseFloat(e.target.value) || 0)}
+              className="input"
+              min={capacityRange.min}
+              max={filters.maxCapacity}
+              step="0.1"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-[var(--color-text-muted)] mb-2">
+              Max Kapasite (MW)
+            </label>
+            <input
+              type="number"
+              value={filters.maxCapacity}
+              onChange={(e) => updateFilter('maxCapacity', parseFloat(e.target.value) || capacityRange.max)}
+              className="input"
+              min={filters.minCapacity}
+              max={capacityRange.max}
+              step="0.1"
+            />
+          </div>
+        </div>
+        
+        <div className="mt-4 p-3 rounded-lg bg-white/5 text-sm">
+          <span className="text-[var(--color-accent-primary)] font-medium">{filteredTurbines.length}</span>
+          <span className="text-[var(--color-text-muted)]"> türbin filtrelendi (toplam {ALL_TURBINES.length} türbin)</span>
+        </div>
+      </div>
+      
       {/* Hedef Kapasite */}
       <div className="glass-card px-6 py-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -424,33 +396,6 @@ function FilterStep({
         </div>
       </div>
       
-      {/* Hub Yüksekliği */}
-      <div className="glass-card px-6 py-6">
-        <h3 className="text-lg font-semibold mb-4">Hub Yüksekliği Filtresi (Opsiyonel)</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Minimum (m)</label>
-            <input
-              type="number"
-              value={filters.minHubHeight ?? ''}
-              onChange={(e) => updateFilter('minHubHeight', e.target.value ? parseFloat(e.target.value) : null)}
-              className="input"
-              placeholder="Boş = filtre yok"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-[var(--color-text-muted)] mb-2">Maksimum (m)</label>
-            <input
-              type="number"
-              value={filters.maxHubHeight ?? ''}
-              onChange={(e) => updateFilter('maxHubHeight', e.target.value ? parseFloat(e.target.value) : null)}
-              className="input"
-              placeholder="Boş = filtre yok"
-            />
-          </div>
-        </div>
-      </div>
-      
       {/* Ek Seçenekler */}
       <div className="glass-card px-6 py-6">
         <h3 className="text-lg font-semibold mb-4">Ek Seçenekler</h3>
@@ -481,123 +426,121 @@ function FilterStep({
       </div>
       
       {/* Türbin Bazlı Ayarlar */}
-      <div className="glass-card px-6 py-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Türbin Ayarları</h3>
-          <span className="text-sm text-[var(--color-text-muted)]">
-            {enabledCount} / {validTurbines.length} aktif
-          </span>
-        </div>
-        
-        {/* Header */}
-        <div className="hidden sm:grid grid-cols-12 gap-3 mb-2 px-4 text-xs text-[var(--color-text-muted)] font-medium">
-          <div className="col-span-1">Aktif</div>
-          <div className="col-span-4">Türbin</div>
-          <div className="col-span-2 text-center">Verimlilik %</div>
-          <div className="col-span-2 text-center">Min Adet</div>
-          <div className="col-span-2 text-center">Max Adet</div>
-          <div className="col-span-1"></div>
-        </div>
-        
-        <div className="space-y-2">
-          {validTurbines.map(turbine => {
-            const settings = getTurbineSettings(turbine.id)
-            return (
-              <div 
-                key={turbine.id} 
-                className={`
-                  grid grid-cols-1 sm:grid-cols-12 gap-3 items-center px-4 py-3 rounded-xl transition-all
-                  ${settings.enabled 
-                    ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30' 
-                    : 'bg-white/5 border border-white/10 opacity-60'
-                  }
-                `}
-              >
-                {/* Checkbox */}
-                <div className="col-span-1 flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={settings.enabled}
-                    onChange={(e) => updateTurbineSettings(turbine.id, 'enabled', e.target.checked)}
-                    className="w-5 h-5 rounded border-2 border-white/20 bg-transparent checked:bg-[var(--color-accent-primary)] checked:border-[var(--color-accent-primary)] cursor-pointer"
-                  />
-                </div>
-                
-                {/* Türbin Adı */}
-                <div className="col-span-4">
-                  <div className="font-medium text-sm">{turbine.brand} {turbine.model}</div>
-                  <div className="text-xs text-[var(--color-text-muted)]">
-                    {turbine.capacity} MW • Hub: {turbine.hubHeight}m
+      {filteredTurbines.length > 0 && (
+        <div className="glass-card px-6 py-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Türbin Ayarları</h3>
+            <span className="text-sm text-[var(--color-text-muted)]">
+              {enabledCount} / {filteredTurbines.length} aktif
+            </span>
+          </div>
+          
+          {/* Header */}
+          <div className="hidden sm:grid grid-cols-12 gap-3 mb-2 px-4 text-xs text-[var(--color-text-muted)] font-medium">
+            <div className="col-span-1">Aktif</div>
+            <div className="col-span-4">Türbin</div>
+            <div className="col-span-2 text-center">Verimlilik %</div>
+            <div className="col-span-2 text-center">Min Adet</div>
+            <div className="col-span-2 text-center">Max Adet</div>
+            <div className="col-span-1"></div>
+          </div>
+          
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {filteredTurbines.map(turbine => {
+              const settings = getTurbineSettings(turbine.id)
+              return (
+                <div 
+                  key={turbine.id} 
+                  className={`
+                    grid grid-cols-1 sm:grid-cols-12 gap-3 items-center px-4 py-3 rounded-xl transition-all
+                    ${settings.enabled 
+                      ? 'bg-[var(--color-accent-primary)]/10 border border-[var(--color-accent-primary)]/30' 
+                      : 'bg-white/5 border border-white/10 opacity-60'
+                    }
+                  `}
+                >
+                  {/* Checkbox */}
+                  <div className="col-span-1 flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={settings.enabled}
+                      onChange={(e) => updateTurbineSettings(turbine.id, 'enabled', e.target.checked)}
+                      className="w-5 h-5 rounded border-2 border-white/20 bg-transparent checked:bg-[var(--color-accent-primary)] checked:border-[var(--color-accent-primary)] cursor-pointer"
+                    />
                   </div>
-                </div>
-                
-                {/* Verimlilik */}
-                <div className="col-span-2">
-                  <div className="flex items-center gap-1">
+                  
+                  {/* Türbin Adı */}
+                  <div className="col-span-4">
+                    <div className="font-medium text-sm">{turbine.brand} {turbine.model}</div>
+                    <div className="text-xs text-[var(--color-text-muted)]">
+                      {turbine.capacity} MW
+                    </div>
+                  </div>
+                  
+                  {/* Verimlilik */}
+                  <div className="col-span-2">
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={settings.efficiency}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? 0 : parseFloat(e.target.value)
+                          updateTurbineSettings(turbine.id, 'efficiency', isNaN(val) ? 0 : val)
+                        }}
+                        className="input w-full text-center text-sm py-2"
+                        min="0"
+                        max="100"
+                        disabled={!settings.enabled}
+                      />
+                      <span className="text-xs text-[var(--color-text-muted)]">%</span>
+                    </div>
+                  </div>
+                  
+                  {/* Min Adet */}
+                  <div className="col-span-2">
                     <input
                       type="number"
-                      value={settings.efficiency}
+                      value={settings.minCount}
                       onChange={(e) => {
-                        const val = e.target.value === '' ? 0 : parseFloat(e.target.value)
-                        updateTurbineSettings(turbine.id, 'efficiency', isNaN(val) ? 0 : val)
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value)
+                        updateTurbineSettings(turbine.id, 'minCount', isNaN(val) ? 0 : val)
                       }}
                       className="input w-full text-center text-sm py-2"
                       min="0"
-                      max="100"
                       disabled={!settings.enabled}
                     />
-                    <span className="text-xs text-[var(--color-text-muted)]">%</span>
+                  </div>
+                  
+                  {/* Max Adet */}
+                  <div className="col-span-2">
+                    <input
+                      type="number"
+                      value={settings.maxCount}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value)
+                        updateTurbineSettings(turbine.id, 'maxCount', isNaN(val) ? 0 : val)
+                      }}
+                      className="input w-full text-center text-sm py-2"
+                      min="0"
+                      disabled={!settings.enabled}
+                    />
+                  </div>
+                  
+                  {/* Efektif MW */}
+                  <div className="col-span-1 text-right">
+                    <span className="text-xs text-[var(--color-text-muted)]">
+                      {(turbine.capacity * settings.efficiency / 100).toFixed(2)} MW
+                    </span>
                   </div>
                 </div>
-                
-                {/* Min Adet */}
-                <div className="col-span-2">
-                  <input
-                    type="number"
-                    value={settings.minCount}
-                    onChange={(e) => {
-                      const val = e.target.value === '' ? 0 : parseInt(e.target.value)
-                      updateTurbineSettings(turbine.id, 'minCount', isNaN(val) ? 0 : val)
-                    }}
-                    className="input w-full text-center text-sm py-2"
-                    min="0"
-                    disabled={!settings.enabled}
-                  />
-                </div>
-                
-                {/* Max Adet */}
-                <div className="col-span-2">
-                  <input
-                    type="number"
-                    value={settings.maxCount}
-                    onChange={(e) => {
-                      const val = e.target.value === '' ? 0 : parseInt(e.target.value)
-                      updateTurbineSettings(turbine.id, 'maxCount', isNaN(val) ? 0 : val)
-                    }}
-                    className="input w-full text-center text-sm py-2"
-                    min="0"
-                    disabled={!settings.enabled}
-                  />
-                </div>
-                
-                {/* Efektif MW */}
-                <div className="col-span-1 text-right">
-                  <span className="text-xs text-[var(--color-text-muted)]">
-                    {(turbine.capacity * settings.efficiency / 100).toFixed(2)} MW
-                  </span>
-                </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
-      </div>
+      )}
       
       {/* Navigation */}
-      <div className="flex justify-between pt-4">
-        <button type="button" onClick={onBack} className="btn btn-secondary">
-          <Icons.ArrowLeft />
-          Geri
-        </button>
+      <div className="flex justify-end pt-4">
         <button 
           type="button" 
           onClick={onNext} 
@@ -608,11 +551,17 @@ function FilterStep({
           <Icons.Zap />
         </button>
       </div>
+      
+      {filteredTurbines.length === 0 && (
+        <p className="text-sm text-yellow-400 text-center">
+          Seçilen filtrelere uygun türbin bulunamadı. Filtreleri genişletmeyi deneyin.
+        </p>
+      )}
     </div>
   )
 }
 
-// ===== Step 3: Sonuçlar =====
+// ===== Results Step =====
 function ResultsStep({
   scenarios,
   filters,
@@ -653,7 +602,7 @@ function ResultsStep({
             Kriterlere uygun senaryo bulunamadı.
           </p>
           <p className="text-sm text-[var(--color-text-muted)] mt-2">
-            Filtreleri gevşetmeyi veya daha fazla türbin eklemeyi deneyin.
+            Filtreleri gevşetmeyi veya daha fazla türbin seçmeyi deneyin.
           </p>
         </div>
       ) : (
@@ -747,21 +696,29 @@ function ResultsStep({
 
 // ===== Main Component =====
 export default function TurbineCalculator() {
-  const [step, setStep] = useState<WizardStep>('turbines')
-  const [turbines, setTurbines] = useState<Turbine[]>([])
+  const [step, setStep] = useState<WizardStep>('filters')
   const [filters, setFilters] = useState<FilterSettings>(getDefaultFilters())
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   
+  // Filtrelenmiş türbinleri hesapla
+  const filteredTurbines = useMemo(() => {
+    const turbines = filterTurbines(
+      filters.selectedBrands,
+      filters.selectedModels,
+      filters.minCapacity,
+      filters.maxCapacity
+    )
+    return getUniqueTurbines(turbines)
+  }, [filters.selectedBrands, filters.selectedModels, filters.minCapacity, filters.maxCapacity])
+  
   const handleCalculate = () => {
-    const validTurbines = turbines.filter(t => t.brand && t.model && t.capacity > 0)
-    const results = calculateScenarios(validTurbines, filters)
+    const results = calculateScenarios(filteredTurbines, filters)
     setScenarios(results)
     setStep('results')
   }
   
   const handleReset = () => {
-    setStep('turbines')
-    setTurbines([])
+    setStep('filters')
     setFilters(getDefaultFilters())
     setScenarios([])
   }
@@ -804,21 +761,11 @@ export default function TurbineCalculator() {
       <main className="container pt-10 pb-8">
         <StepIndicator currentStep={step} />
         
-        {step === 'turbines' && (
-          <TurbineStep
-            turbines={turbines}
-            setTurbines={setTurbines}
-            onNext={() => setStep('filters')}
-          />
-        )}
-        
         {step === 'filters' && (
           <FilterStep
-            turbines={turbines}
             filters={filters}
             setFilters={setFilters}
             onNext={handleCalculate}
-            onBack={() => setStep('turbines')}
           />
         )}
         

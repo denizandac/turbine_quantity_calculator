@@ -1,4 +1,5 @@
 import type { Turbine, FilterSettings, Scenario, ScenarioItem, TurbineFilterSettings } from '../types'
+import { getCapacityRange } from '../data/turbines'
 
 // Hesaplama için türbin bilgisi (verimlilik uygulanmış)
 interface TurbineWithSettings {
@@ -29,14 +30,6 @@ export function calculateScenarios(
     .filter(t => {
       // Aktif değilse dahil etme
       if (!t.settings.enabled) return false
-      
-      // Hub yüksekliği kontrolü
-      if (filters.minHubHeight !== null && t.turbine.hubHeight < filters.minHubHeight) {
-        return false
-      }
-      if (filters.maxHubHeight !== null && t.turbine.hubHeight > filters.maxHubHeight) {
-        return false
-      }
       return true
     })
 
@@ -164,13 +157,17 @@ export function getDefaultTurbineSettings(turbineId: string): TurbineFilterSetti
  * Varsayılan filtre ayarları
  */
 export function getDefaultFilters(): FilterSettings {
+  const capacityRange = getCapacityRange()
+  
   return {
+    selectedBrands: [],
+    selectedModels: [],
+    minCapacity: capacityRange.min,
+    maxCapacity: capacityRange.max,
     targetCapacity: 100, // 100 MW
     tolerancePercent: 5, // %5 tolerans
     minTurbineCount: 1,
     maxTurbineCount: 50,
-    minHubHeight: null,
-    maxHubHeight: null,
     turbineSettings: [],
     noExceedTarget: false, // Hedef aşılmasın
     maxScenarios: 100 // Maksimum senaryo sayısı
