@@ -6,8 +6,8 @@ import { ALL_TURBINES, getAllBrands, getModelsByBrand, filterTurbines, getUnique
 // Web Worker'ı Vite'ın özel syntax'ı ile import et
 import CalculatorWorker from '../workers/calculator.worker?worker'
 
-// Maksimum türbin limiti (performans için)
-const MAX_TURBINES_FOR_CALCULATION = 15
+// Uyarı eşiği (sadece bilgilendirme)
+const TURBINE_WARNING_THRESHOLD = 30
 
 // ===== Icons =====
 const Icons = {
@@ -386,20 +386,20 @@ function FilterStep({
           </div>
         </div>
         
-        <div className={`mt-4 p-3 rounded-lg text-sm ${filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION ? 'bg-red-500/10 border border-red-500/30' : 'bg-white/5'}`}>
-          {filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION ? (
-            <div className="flex items-center gap-2 text-red-400">
+        <div className={`mt-4 p-3 rounded-lg text-sm ${filteredTurbines.length > TURBINE_WARNING_THRESHOLD ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-white/5'}`}>
+          {filteredTurbines.length > TURBINE_WARNING_THRESHOLD ? (
+            <div className="flex items-center gap-2 text-yellow-400">
               <Icons.AlertTriangle />
               <span>
-                <strong>{filteredTurbines.length}</strong> türbin seçili - maksimum <strong>{MAX_TURBINES_FOR_CALCULATION}</strong> türbin seçebilirsiniz.
+                <strong>{filteredTurbines.length}</strong> türbin seçili - hesaplama biraz uzun sürebilir.
                 <br />
-                <span className="text-red-400/70">Lütfen marka/model filtrelerini daraltın.</span>
+                <span className="text-yellow-400/70">Daha hızlı sonuç için filtreleri daraltabilirsiniz.</span>
               </span>
             </div>
           ) : (
             <>
               <span className="text-[var(--color-accent-primary)] font-medium">{filteredTurbines.length}</span>
-              <span className="text-[var(--color-text-muted)]"> türbin seçildi (maks. {MAX_TURBINES_FOR_CALCULATION})</span>
+              <span className="text-[var(--color-text-muted)]"> türbin seçildi</span>
             </>
           )}
         </div>
@@ -508,7 +508,7 @@ function FilterStep({
         <button 
           type="button" 
           onClick={onNext} 
-          disabled={filteredTurbines.length === 0 || filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION}
+          disabled={filteredTurbines.length === 0}
           className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Hesapla
@@ -519,12 +519,6 @@ function FilterStep({
       {filteredTurbines.length === 0 && (
         <p className="text-sm text-yellow-400 text-center">
           Seçilen filtrelere uygun türbin bulunamadı. Filtreleri genişletmeyi deneyin.
-        </p>
-      )}
-      
-      {filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION && (
-        <p className="text-sm text-red-400 text-center">
-          Performans için türbin sayısını {MAX_TURBINES_FOR_CALCULATION}'e düşürün.
         </p>
       )}
     </div>
@@ -753,12 +747,6 @@ export default function TurbineCalculator() {
   }, [])
   
   const handleCalculate = useCallback(() => {
-    // Türbin sayısı kontrolü
-    if (filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION) {
-      alert(`Performans için en fazla ${MAX_TURBINES_FOR_CALCULATION} türbin seçebilirsiniz.\nŞu an ${filteredTurbines.length} türbin seçili.\n\nLütfen marka/model filtrelerini daraltın.`)
-      return
-    }
-    
     if (filteredTurbines.length === 0) {
       alert('Lütfen en az bir türbin seçin.')
       return
