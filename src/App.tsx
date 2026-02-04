@@ -1,8 +1,7 @@
-import LandingPage from './components/LandingPage'
+import TurbineCalculator from './components/TurbineCalculator'
 
 function App() {
-  return <LandingPage />
+  return <TurbineCalculator />
 }
 
 export default App
-
