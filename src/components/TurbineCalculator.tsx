@@ -1,7 +1,13 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
-import type { FilterSettings, Scenario, WizardStep } from '../types'
-import { calculateScenarios, getDefaultFilters } from '../utils/calculator'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import type { FilterSettings, Scenario, WizardStep, Turbine } from '../types'
+import { getDefaultFilters } from '../utils/calculator'
 import { ALL_TURBINES, getAllBrands, getModelsByBrand, filterTurbines, getUniqueTurbines, getCapacityRange } from '../data/turbines'
+
+// Web Worker'ı Vite'ın özel syntax'ı ile import et
+import CalculatorWorker from '../workers/calculator.worker?worker'
+
+// Maksimum türbin limiti (performans için)
+const MAX_TURBINES_FOR_CALCULATION = 15
 
 // ===== Icons =====
 const Icons = {
@@ -53,6 +59,16 @@ const Icons = {
   Search: () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+  ),
+  Loader: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+    </svg>
+  ),
+  AlertTriangle: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
     </svg>
   ),
 }
@@ -370,9 +386,22 @@ function FilterStep({
           </div>
         </div>
         
-        <div className="mt-4 p-3 rounded-lg bg-white/5 text-sm">
-          <span className="text-[var(--color-accent-primary)] font-medium">{filteredTurbines.length}</span>
-          <span className="text-[var(--color-text-muted)]"> türbin seçildi (toplam {ALL_TURBINES.length} türbin)</span>
+        <div className={`mt-4 p-3 rounded-lg text-sm ${filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION ? 'bg-red-500/10 border border-red-500/30' : 'bg-white/5'}`}>
+          {filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION ? (
+            <div className="flex items-center gap-2 text-red-400">
+              <Icons.AlertTriangle />
+              <span>
+                <strong>{filteredTurbines.length}</strong> türbin seçili - maksimum <strong>{MAX_TURBINES_FOR_CALCULATION}</strong> türbin seçebilirsiniz.
+                <br />
+                <span className="text-red-400/70">Lütfen marka/model filtrelerini daraltın.</span>
+              </span>
+            </div>
+          ) : (
+            <>
+              <span className="text-[var(--color-accent-primary)] font-medium">{filteredTurbines.length}</span>
+              <span className="text-[var(--color-text-muted)]"> türbin seçildi (maks. {MAX_TURBINES_FOR_CALCULATION})</span>
+            </>
+          )}
         </div>
       </div>
       
@@ -479,7 +508,7 @@ function FilterStep({
         <button 
           type="button" 
           onClick={onNext} 
-          disabled={filteredTurbines.length === 0}
+          disabled={filteredTurbines.length === 0 || filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION}
           className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Hesapla
@@ -492,6 +521,67 @@ function FilterStep({
           Seçilen filtrelere uygun türbin bulunamadı. Filtreleri genişletmeyi deneyin.
         </p>
       )}
+      
+      {filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION && (
+        <p className="text-sm text-red-400 text-center">
+          Performans için türbin sayısını {MAX_TURBINES_FOR_CALCULATION}'e düşürün.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ===== Loading Screen =====
+function LoadingScreen({ progress }: { progress: number }) {
+  return (
+    <div className="fixed inset-0 z-[100] bg-[var(--color-bg-primary)]/95 backdrop-blur-xl flex items-center justify-center">
+      <div className="text-center space-y-8 max-w-md mx-auto px-6">
+        {/* Animated Logo */}
+        <div className="relative">
+          <div className="w-24 h-24 mx-auto rounded-2xl bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-2xl shadow-[var(--color-accent-primary)]/30 animate-pulse">
+            <Icons.Wind />
+          </div>
+          <div className="absolute -inset-4 bg-gradient-to-r from-[var(--color-accent-primary)]/20 to-[var(--color-accent-secondary)]/20 rounded-3xl blur-2xl animate-pulse" />
+        </div>
+        
+        {/* Progress */}
+        <div className="space-y-4">
+          <h2 className="text-2xl font-bold">Senaryolar Hesaplanıyor</h2>
+          <p className="text-[var(--color-text-muted)]">
+            Kombinasyonlar değerlendiriliyor, lütfen bekleyin...
+          </p>
+          
+          {/* Progress Bar */}
+          <div className="relative w-full h-3 bg-white/10 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+            <div 
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"
+              style={{ animationDuration: '2s' }}
+            />
+          </div>
+          
+          <p className="text-sm text-[var(--color-text-muted)] font-mono">
+            {progress.toFixed(0)}%
+          </p>
+        </div>
+        
+        {/* Loading Dots */}
+        <div className="flex items-center justify-center gap-2">
+          {[0, 1, 2].map(i => (
+            <div 
+              key={i}
+              className="w-3 h-3 rounded-full bg-[var(--color-accent-primary)]"
+              style={{ 
+                animation: 'bounce 1s infinite',
+                animationDelay: `${i * 0.15}s` 
+              }}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -638,6 +728,9 @@ export default function TurbineCalculator() {
   const [step, setStep] = useState<WizardStep>('filters')
   const [filters, setFilters] = useState<FilterSettings>(getDefaultFilters())
   const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [isCalculating, setIsCalculating] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const workerRef = useRef<Worker | null>(null)
   
   // Filtrelenmiş türbinleri hesapla
   const filteredTurbines = useMemo(() => {
@@ -650,20 +743,89 @@ export default function TurbineCalculator() {
     return getUniqueTurbines(turbines)
   }, [filters.selectedBrands, filters.selectedModels, filters.minCapacity, filters.maxCapacity])
   
-  const handleCalculate = () => {
-    const results = calculateScenarios(filteredTurbines, filters)
-    setScenarios(results)
-    setStep('results')
-  }
+  // Worker'ı temizle
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate()
+      }
+    }
+  }, [])
+  
+  const handleCalculate = useCallback(() => {
+    // Türbin sayısı kontrolü
+    if (filteredTurbines.length > MAX_TURBINES_FOR_CALCULATION) {
+      alert(`Performans için en fazla ${MAX_TURBINES_FOR_CALCULATION} türbin seçebilirsiniz.\nŞu an ${filteredTurbines.length} türbin seçili.\n\nLütfen marka/model filtrelerini daraltın.`)
+      return
+    }
+    
+    if (filteredTurbines.length === 0) {
+      alert('Lütfen en az bir türbin seçin.')
+      return
+    }
+    
+    // Loading başlat
+    setIsCalculating(true)
+    setProgress(0)
+    
+    // Worker oluştur
+    const worker = new CalculatorWorker()
+    workerRef.current = worker
+    
+    worker.onmessage = (e: MessageEvent) => {
+      const { type, progress: p, scenarios: results, error } = e.data
+      
+      if (type === 'progress') {
+        setProgress(p || 0)
+      } else if (type === 'complete') {
+        setProgress(100)
+        setScenarios(results || [])
+        setIsCalculating(false)
+        setStep('results')
+        worker.terminate()
+        workerRef.current = null
+      } else if (type === 'error') {
+        console.error('Worker error:', error)
+        setIsCalculating(false)
+        alert('Hesaplama sırasında bir hata oluştu: ' + error)
+        worker.terminate()
+        workerRef.current = null
+      }
+    }
+    
+    worker.onerror = (e) => {
+      console.error('Worker error:', e)
+      setIsCalculating(false)
+      alert('Hesaplama sırasında bir hata oluştu.')
+      worker.terminate()
+      workerRef.current = null
+    }
+    
+    // Worker'a veri gönder
+    worker.postMessage({
+      turbines: filteredTurbines,
+      filters
+    })
+  }, [filteredTurbines, filters])
   
   const handleReset = () => {
+    // Worker'ı durdur
+    if (workerRef.current) {
+      workerRef.current.terminate()
+      workerRef.current = null
+    }
     setStep('filters')
     setFilters(getDefaultFilters())
     setScenarios([])
+    setIsCalculating(false)
+    setProgress(0)
   }
   
   return (
     <div className="min-h-screen bg-[var(--color-bg-primary)] bg-noise">
+      {/* Loading Screen */}
+      {isCalculating && <LoadingScreen progress={progress} />}
+      
       {/* Header */}
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-[var(--color-bg-primary)]/70 border-b border-white/[0.05]">
         <div className="container pt-5 pb-5 flex items-center justify-between">
